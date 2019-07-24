@@ -11,6 +11,8 @@
 #include "io.c"
 #include "io.h"
 #include "keypad.h"
+#include "shift.c"
+#include <avr/interrupt.h>
 #include <stdio.h>
 #include <stdlib.h>
 //#include "lcd_8bit_task.h"
@@ -19,9 +21,13 @@
 //#include "stack.h"
 #include "timer.h"
 //#include "usart.h"
+
+
+
+
 unsigned char point = 0;
-static task task1, task2,task3, task4;
-task *tasks[] = {&task1, &task2, &task3, &task4};
+static task task1, task2,task3, task4, task5;
+task *tasks[] = {&task1, &task2, &task3, &task4, &task5};
 enum pauseButtonSM_States {pauseButton_wait, pauseButton_press, pauseButton_release};
 enum charactors {me,me_eating, box,block, coin};
 void writedata(unsigned char row, unsigned char col, unsigned char simbol, unsigned char special_charactor)
@@ -201,6 +207,7 @@ int Game(int state)
 }
 enum MovingComponentStates {MCstart, MCwait, MCmoving};
 unsigned char randnum= 0;
+unsigned char soundFlag = 0;
 int MCSM(int state)
 {
 	switch(state)
@@ -253,6 +260,7 @@ int MCSM(int state)
 					coins[i] = 0;
 					writedata(1,position,me_eating,1);
 					LCD_Cursor(0);
+
 					point++;
 				}
 			}
@@ -280,35 +288,44 @@ int pauseButtonSMTick(int state){
 		case pauseButton_wait:
 		break;
 		case pauseButton_press:
+		
 		if(press == '5'){
+
 			if(position  >= 17){
 				writedata(1,position,' ',0);
 				position -= 16;
 				writedata(1,position,me,1);
 				LCD_Cursor(0);
 			}
+
 		}else if (press == '8'){
+
 			if(position <17 ){
 				writedata(1,position,' ',0);
 				position += 16;
 				writedata(1,position,me,1);
 				LCD_Cursor(0);
 			}
+
 		}else if (press == '9'){
+
 			if(position != 16 && position != 31){
 				writedata(1,position,' ',0);
 				position ++;
 				writedata(1,position,me,1);
 				LCD_Cursor(0);
 			}
+
 		}else if (press == '7')
 		{
+
 			if(position != 1 && position != 17){
 				writedata(1,position,' ',0);
 				position --;
 				writedata(1,position,me,1);
 				LCD_Cursor(0);
 			}
+
 		}
 
 		break;
@@ -334,7 +351,7 @@ int GameTimeSM(int state)
 			state = Counting;
 			break;
 		case Counting:
-			if(tasks[0]->state == Gaming && GameTimeCount > 60)
+			if(tasks[0]->state == Gaming && GameTimeCount > 100)
 			{
 				state = CountEnd;
 			}else if(tasks[0]->state != Gaming){ state = WaitTime;}
@@ -364,11 +381,47 @@ int GameTimeSM(int state)
 	
 	return state;
 }
+
+enum JumpStates {WaitforJump, Jumping, Landing};
+	
+int JumpSM(int state)
+{
+	switch(state){
+		case WaitforJump:
+			if(position <17)
+				state = Jumping;
+			break;
+		case Jumping:
+			state = Landing;
+			break;
+		case Landing:
+			state = WaitforJump;
+			break;
+		default:
+			state = WaitforJump;
+	}
+	switch(state){
+		case WaitforJump:
+			break;
+		case Jumping:
+			break;
+		case Landing:
+			writedata(1,position,' ',0);
+			position +=16;
+			writedata(1,position,me,1);
+			LCD_Cursor(0);
+			break;
+	}
+	return state;
+}
+
+
 int main(void) {
     /* Insert DDR and PORT initializations */
 	/*unsigned char x;
 	DDRB = 0xFF; PORTB = 0x00;*/
 	DDRC = 0xFF; PORTC  = 0x00;
+	DDRB = 0xFF; PORTB = 0x00;
 	DDRD = 0xFF; PORTD = 0x00;
 	DDRA = 0xF0; PORTA = 0x0F;
 //	DDRB = 0xFF; PORTB = 0x00;
@@ -380,7 +433,7 @@ int main(void) {
     /* Insert your solution below */
     const unsigned short numTasks = sizeof(tasks)/sizeof(task*);
     
-    //Task 1 (pauseButtonToggleSM)
+    //Task 1 (pauseButtonToggleSM)sili guo
     
     task1.state =  Start;//Task initial state
     task1.period = 5;//Task Period
@@ -403,16 +456,33 @@ int main(void) {
 	task4.elapsedTime = task4.period;//Task current elapsed time.
 	task4.TickFct = &GameTimeSM;//Function pointer for the tick
 
+	task5.state = WaitforJump;//Task initial state
+	task5.period = 40;//Task Period
+	task5.elapsedTime = task5.period;//Task current elapsed time.
+	task5.TickFct = &JumpSM;//Function pointer for the tick
+	
+
 	unsigned long int GCD = tasks[0]->period;
 	unsigned short i;//Scheduler for-loop iterator
-	/*
+	
 	for( i = 1; i < numTasks;i ++)
 	{
 		GCD = findGCD(tasks[i]-> period, GCD);
-	}*/
+	}
     TimerSet(GCD);
     TimerOn();
     
+       uint8_t led_pattern[8]={
+                        0b10000001,
+                        0b11000011,
+                        0b11100111,
+                        0b11111111,
+                        0b01111110,
+                        0b00111100,
+                        0b00011000,
+                        0b00000000,
+                     };
+		HC595Write(led_pattern[2]);  
     while (1) {
 		for(i = 0; i < numTasks; i++){//Scheduler code
 			if(tasks[i]->elapsedTime == tasks[i]->period){//Task is ready to tick
