@@ -29,7 +29,11 @@ unsigned char point = 0;
 static task task1, task2,task3, task4, task5;
 task *tasks[] = {&task1, &task2, &task3, &task4, &task5};
 enum pauseButtonSM_States {pauseButton_wait, pauseButton_press, pauseButton_release};
-enum charactors {me,me_eating, box,block, coin};
+enum charactors {me,me_eating, winc,lossc, coin};
+	
+unsigned char win = 0;
+	
+unsigned char me_state = me;
 void writedata(unsigned char row, unsigned char col, unsigned char simbol, unsigned char special_charactor)
 {
 		LCD_Cursor(col+(row-1)*16);
@@ -46,13 +50,13 @@ void defineChars()
 {
 	unsigned char mes[8] = {0x00, 0x00, 0x0F, 0x15, 0x16, 0x1E, 0x1F, 0x1F };  /* Custom char set for alphanumeric LCD Module */
 	unsigned char mes_eating[8] =  {0x00, 0x00, 0x0F, 0x15, 0x17, 0x1F, 0x1F, 0x1F };
-	unsigned char boxs[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x05, 0x07 };
-	unsigned char blocks[8] = {0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F };
+	unsigned char wins[8] = {0x00, 0x00, 0x0A, 0x00, 0x0A, 0x04, 0x00, 0x00 };
+	unsigned char loss[8] = {0x00, 0x00, 0x0A, 0x00, 0x04, 0x0A, 0x00, 0x00 };
 	unsigned char coins[8] = {0x00, 0x00,0x04,0x0A, 0x11, 0x0A, 0x04,0x00 };
 	LCD_Custom_Char(me, mes);
 	LCD_Custom_Char(me_eating, mes_eating);
-	LCD_Custom_Char(box, boxs);
-	LCD_Custom_Char(block,blocks);
+	LCD_Custom_Char(winc, wins);
+	LCD_Custom_Char(lossc,loss);
 	LCD_Custom_Char(coin,coins);
 	
 }
@@ -68,6 +72,16 @@ void initialdisplay()
 	LCD_ClearScreen();
 }
 
+       uint8_t led_pattern[8]={
+	       0b11111111,
+	       0b01111111,
+	       0b00111111,
+	       0b00011111,
+	       0b00001111,
+	       0b00000111,
+	       0b00000011,
+	       0b00000001,
+       };
 void movestar()
 {
 	for(i = 0; i < 4; i++)
@@ -80,7 +94,7 @@ void movestar()
 void movecoins()
 {
 		
-	for(i = 0; i < coins_number; i++)
+	for(i = coins_begin; i < coins_number; i++)
 	{
 		if(coins[i] != 0){
 			if(coins[i] == 1)
@@ -115,6 +129,12 @@ void displaystar()
 		writedata(2, star[i],'*',0 );
 	}
 }
+
+void reset_highest_score()
+{
+		eeprom_write_byte((uint8_t*)1, 0);
+		eeprom_write_byte((uint8_t*)2, 0);
+}
 unsigned int press = '\0';
 unsigned char failflag = 0;
 enum GameStates {Start, WaitforStart, GameStart, Gaming, Fail};
@@ -141,8 +161,9 @@ int Game(int state)
 				failflag = 0;
 			}
 			for(i = 0 ; i < 4;i++)
-				if(position == (star[i]+(i>1)*16))
+				if(position == (star[i]+(i>1)*16)){
 					state = Fail;
+				}
 			break;
 		case Fail:
 			if(press == '1' )
@@ -167,7 +188,7 @@ int Game(int state)
 			star[3] = 14;
 			for(j = 0; j< coins_number;j++)
 			{
-				coins[j] = 3+(j>3)*16+j*rand()%2;
+				coins[j] = (3+(j>3)*16+j*(rand()%2))*(rand()%2);
 			}
 				const unsigned char string[32] ="Press 1 to start                ";
 				LCD_DisplayString(1, string);
@@ -180,14 +201,31 @@ int Game(int state)
 			writedata(1,position,me,1);
 			displaycoin();
 			point = 0;
+			tasks[3]->elapsedTime = tasks[3]->period;
 			LCD_Cursor(0);
 			break;
 		case Gaming:
 			break;
 		case Fail:
 			if(last_state != state){
-				const unsigned char string2[31] ="Your Score:      Highest: ";
-				LCD_DisplayString(1, string2);
+				
+				const unsigned char string2[31] ="Score:       Highest: ";
+				LCD_DisplayString(7, string2);
+				LCD_Cursor(1);
+				if(win && point > 10)
+				{
+					LCD_Char(winc);
+					writedata(1,2,'W',0);	
+					writedata(1,3,'I',0);
+					writedata(1,4,'N',0);
+				}else{
+					LCD_Char(lossc);
+					writedata(1,2,'L',0);
+					writedata(1,3,'O',0);
+					writedata(1,4,'S',0);
+					writedata(1,5,'S',0);
+				}
+				win = 0;
 				LCD_Cursor(14);
 				LCD_WriteData('0'+point/10);
 				LCD_Cursor(15);
@@ -198,7 +236,7 @@ int Game(int state)
 					eeprom_write_byte((uint8_t*)2, point%10);
 				}
 				LCD_Cursor(28);
-				LCD_WriteData('0'+eeprom_read_byte((uint8_t*)1));
+				LCD_WriteData( '0'+eeprom_read_byte((uint8_t*)1));
 				LCD_Cursor(29);
 				LCD_WriteData('0'+eeprom_read_byte((uint8_t*)2));
 			}
@@ -238,10 +276,10 @@ int MCSM(int state)
 				initialdisplay();
 				writedata(1,position,' ',0);
 				position --;
-				writedata(1,position,me,1);
+				writedata(1,position,me_state,1);
 				movecoins();
 				movestar();
-				randnum = rand()%3;
+				randnum = rand()%6;
 				if((randnum  ==0)&&star[0] != 16&& star[1]!= 16){
 					coins[coins_number] = 16;
 					coins_number++;
@@ -255,15 +293,7 @@ int MCSM(int state)
 				LCD_Cursor(0);
 			
 			}
-			for(i = coins_begin; i < coins_number; i++){
-				if(position == coins[i]){//get points!!!!!!!!!!!!!!!!!
-					coins[i] = 0;
-					writedata(1,position,me_eating,1);
-					LCD_Cursor(0);
 
-					point++;
-				}
-			}
 			break;
 		default:
 			break;
@@ -296,6 +326,7 @@ int pauseButtonSMTick(int state){
 				position -= 16;
 				writedata(1,position,me,1);
 				LCD_Cursor(0);
+				me_state = me;
 			}
 
 		}else if (press == '8'){
@@ -305,6 +336,7 @@ int pauseButtonSMTick(int state){
 				position += 16;
 				writedata(1,position,me,1);
 				LCD_Cursor(0);
+				me_state = me;
 			}
 
 		}else if (press == '9'){
@@ -314,6 +346,7 @@ int pauseButtonSMTick(int state){
 				position ++;
 				writedata(1,position,me,1);
 				LCD_Cursor(0);
+				me_state = me;
 			}
 
 		}else if (press == '7')
@@ -324,10 +357,32 @@ int pauseButtonSMTick(int state){
 				position --;
 				writedata(1,position,me,1);
 				LCD_Cursor(0);
+				me_state = me;
 			}
-
+		}else if (press == '6')
+		{
+			if(position >16 && position != 32 ){
+				writedata(1,position,' ',0);
+				position -= 15;
+				writedata(1,position,me,1);
+				LCD_Cursor(0);
+				me_state = me;
+			
+			}
+		}else if(press == 'A')
+		{
+			reset_highest_score();
 		}
-
+		for(i = coins_begin; i < coins_number; i++){
+			if(position == coins[i]){//get points!!!!!!!!!!!!!!!!!
+				coins[i] = 0;
+				me_state = me_eating;
+				writedata(1,position,me_state,1);
+				LCD_Cursor(0);
+				
+				point++;
+			}
+		}
 		break;
 		
 		case pauseButton_release:
@@ -344,16 +399,17 @@ int GameTimeSM(int state)
 	switch(state)
 	{
 		case WaitTime:
-			if(tasks[0]->state == Gaming)
+			if(tasks[0]->state == Gaming || tasks[0]->state == GameStart)
 				state = StartCount;
 			break;
 		case StartCount:
 			state = Counting;
 			break;
 		case Counting:
-			if(tasks[0]->state == Gaming && GameTimeCount > 100)
+			if((tasks[0]->state == Gaming ) && GameTimeCount ==40)
 			{
 				state = CountEnd;
+				win = 1;
 			}else if(tasks[0]->state != Gaming){ state = WaitTime;}
 			break;
 		case CountEnd:
@@ -371,6 +427,7 @@ int GameTimeSM(int state)
 			GameTimeCount = 0;
 			break;
 		case Counting:
+			ShiftWrite(led_pattern[GameTimeCount/5]);  
 			GameTimeCount++;
 			break;
 		case CountEnd:
@@ -406,9 +463,18 @@ int JumpSM(int state)
 		case Jumping:
 			break;
 		case Landing:
+			me_state = me;
 			writedata(1,position,' ',0);
 			position +=16;
-			writedata(1,position,me,1);
+			for(i = coins_begin; i < coins_number; i++){
+				if(position == coins[i]){//get points!!!!!!!!!!!!!!!!!
+						coins[i] = 0;
+						me_state = me_eating;
+						point++;
+					}
+			}
+
+			writedata(1,position,me_state,1);
 			LCD_Cursor(0);
 			break;
 	}
@@ -427,13 +493,13 @@ int main(void) {
 //	DDRB = 0xFF; PORTB = 0x00;
 	defineChars();
 	LCD_init();
-	eeprom_write_byte((uint8_t*)1,0);
-	eeprom_write_byte((uint8_t*)2,0);
+	
+	 HC595Init();
 	//LCD_DisplayString(1,string);
     /* Insert your solution below */
     const unsigned short numTasks = sizeof(tasks)/sizeof(task*);
     
-    //Task 1 (pauseButtonToggleSM)sili guo
+    //Task 1 (pauseButtonToggleSM)
     
     task1.state =  Start;//Task initial state
     task1.period = 5;//Task Period
@@ -452,7 +518,7 @@ int main(void) {
 	task3.TickFct = &pauseButtonSMTick;//Function pointer for the tick
 
 	task4.state = WaitTime;//Task initial state
-	task4.period = 50;//Task Period
+	task4.period = 70;//Task Period
 	task4.elapsedTime = task4.period;//Task current elapsed time.
 	task4.TickFct = &GameTimeSM;//Function pointer for the tick
 
@@ -464,30 +530,20 @@ int main(void) {
 
 	unsigned long int GCD = tasks[0]->period;
 	unsigned short i;//Scheduler for-loop iterator
-	
+	ShiftWrite(0);
 	for( i = 1; i < numTasks;i ++)
 	{
 		GCD = findGCD(tasks[i]-> period, GCD);
 	}
     TimerSet(GCD);
     TimerOn();
-    
-       uint8_t led_pattern[8]={
-                        0b10000001,
-                        0b11000011,
-                        0b11100111,
-                        0b11111111,
-                        0b01111110,
-                        0b00111100,
-                        0b00011000,
-                        0b00000000,
-                     };
-		HC595Write(led_pattern[2]);  
+   
     while (1) {
 		for(i = 0; i < numTasks; i++){//Scheduler code
 			if(tasks[i]->elapsedTime == tasks[i]->period){//Task is ready to tick
 				tasks[i]->state= tasks[i]->TickFct(tasks[i]->state);//set next state
-				tasks[i]->elapsedTime = 0;//Reset the elapsed time for next tick;
+				tasks[i]->elapsedTime = 0;//Reset the elapsed time for next tick\;
+										
 			}
 			tasks[i]->elapsedTime += GCD; 
 		}
